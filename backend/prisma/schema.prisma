@@ -36,7 +36,6 @@ model User {
 
   participants     Participant[]
   messages         Message[]
-  otps             Otp[]
 
   @@index([email])
 }
@@ -49,8 +48,6 @@ model Otp {
   consumed  Boolean  @default(false)
   attempts  Int      @default(0)
   createdAt DateTime @default(now())
-
-  user      User?    @relation(fields: [email], references: [email])
 
   @@index([email])
 }
