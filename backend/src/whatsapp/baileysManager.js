@@ -144,13 +144,28 @@ async function persistMessage(sock, sessionRecordId, waChat, msg) {
  * Starts (or resumes) a Baileys session for one app user, wiring every
  * event to Socket.io (`user:<userId>` room) and to Postgres via Prisma so
  * chats/messages survive process restarts.
- *
- * If `phoneNumber` is given (E.164 digits, no "+"), we request a real
- * WhatsApp pairing code instead of a QR — this is the exact same
- * "Link with phone number instead" flow WhatsApp Web itself offers.
  */
 async function startSession(userId, io, phoneNumber) {
-  if (sessions.has(userId)) return sessions.get(userId).sock;
+  // --- PERMANENT FIX: AUTO-CLEANUP ---
+  // अगर यूज़र नया नंबर डाल रहा है (phoneNumber is present) या पुराना सेशन अटक गया है,
+  // तो हम पुराने कनेक्शन को पहले पूरी तरह से बंद (Delete) कर देंगे।
+  if (sessions.has(userId)) {
+    const existingSession = sessions.get(userId);
+    
+    // अगर नया नंबर आया है, या पुराना सेशन 'connected' नहीं है
+    if (phoneNumber || existingSession.status !== "connected") {
+      try { existingSession.sock.ws.close(); } catch (e) {} // ज़बरदस्ती सॉकेट बंद करो
+      sessions.delete(userId);
+      const dir = sessionDirFor(userId);
+      if (fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true }); // पुरानी फाइल्स डिलीट करो
+      }
+    } else {
+      // अगर एकदम सही से कनेक्टेड है और नया नंबर नहीं डाला है, तो बस पुराना वापस कर दो
+      return existingSession.sock;
+    }
+  }
+  // ------------------------------------
 
   const dir = sessionDirFor(userId);
   fs.mkdirSync(dir, { recursive: true });
@@ -167,8 +182,6 @@ async function startSession(userId, io, phoneNumber) {
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
     generateHighQualityLinkPreview: false,
-    // Keep memory low on small hosts (Render free tier etc.) — we persist
-    // our own history to Postgres instead of relying on Baileys' cache.
     syncFullHistory: false,
     markOnlineOnConnect: false,
   });
@@ -179,13 +192,16 @@ async function startSession(userId, io, phoneNumber) {
 
   // Real "enter your phone number" pairing path (alternative to QR).
   if (phoneNumber && !state.creds.registered) {
-    try {
-      const code = await sock.requestPairingCode(phoneNumber.replace(/[^0-9]/g, ""));
-      emit("wa:pairing-code", { code });
-    } catch (err) {
-      emit("wa:disconnected", { reason: "pairing_failed" });
-      console.error("requestPairingCode failed:", err.message);
-    }
+    // 1.5 सेकंड का इंतज़ार ताकि सॉकेट सर्वर से पूरी तरह जुड़ जाए
+    setTimeout(async () => {
+      try {
+        const code = await sock.requestPairingCode(phoneNumber.replace(/[^0-9]/g, ""));
+        emit("wa:pairing-code", { code });
+      } catch (err) {
+        emit("wa:disconnected", { reason: "pairing_failed" });
+        console.error("requestPairingCode failed:", err.message);
+      }
+    }, 1500); 
   }
 
   sock.ev.on("creds.update", saveCreds);
@@ -241,8 +257,6 @@ async function startSession(userId, io, phoneNumber) {
     }
   });
 
-  // Initial history sync (fires once after pairing, or on first boot
-  // after a restart while creds are already valid).
   sock.ev.on("messaging-history.set", async ({ chats, messages }) => {
     try {
       const record = await prisma.waSession.findUnique({ where: { userId } });
@@ -270,7 +284,6 @@ async function startSession(userId, io, phoneNumber) {
     }
   });
 
-  // Live incoming/outgoing messages.
   sock.ev.on("messages.upsert", async ({ messages }) => {
     try {
       const record = await prisma.waSession.findUnique({ where: { userId } });
@@ -300,7 +313,6 @@ async function startSession(userId, io, phoneNumber) {
     }
   });
 
-  // Delivery/read receipt updates for messages we sent.
   sock.ev.on("message-receipt.update", async (updates) => {
     for (const { key, receipt } of updates) {
       const status = receipt?.readTimestamp ? "read" : receipt?.receiptTimestamp ? "delivered" : null;
@@ -312,7 +324,6 @@ async function startSession(userId, io, phoneNumber) {
         });
         emit("wa:message:status", { waMessageId: key.id, status });
       } catch (err) {
-        // non-fatal
       }
     }
   });
@@ -342,7 +353,6 @@ function serializeMessage(m) {
   };
 }
 
-/** Builds a minimal WAMessage-shaped stub so Baileys can render a reply/quote. */
 function buildQuotedStub(jid, replyToWaId, replyToText, fromMe) {
   if (!replyToWaId) return undefined;
   return {
@@ -360,7 +370,6 @@ async function sendText(userId, jid, text, { replyToWaId, replyToText, replyFrom
   return session.sock.sendMessage(jid, { text }, quoted ? { quoted } : {});
 }
 
-/** mediaType: "image" | "video" | "audio" | "document" */
 async function sendMedia(
   userId,
   jid,
@@ -381,12 +390,6 @@ async function sendMedia(
   return session.sock.sendMessage(jid, content, quoted ? { quoted } : {});
 }
 
-/**
- * Starts a real 1:1 chat with a phone number. Uses Baileys' `onWhatsApp`
- * to verify the number is actually on WhatsApp before creating the chat
- * row — exactly what the real app does when you type a number into
- * "New chat" and it doesn't exist yet as a local contact.
- */
 async function startChatWithNumber(userId, rawNumber) {
   const session = sessions.get(userId);
   if (!session || session.status !== "connected") {
@@ -409,7 +412,6 @@ async function logoutSession(userId) {
     try {
       await session.sock.logout();
     } catch {
-      // ignore — we're deleting the session either way
     }
     sessions.delete(userId);
   }
