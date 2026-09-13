@@ -27,4 +27,5 @@ ENV WA_SESSIONS_DIR=/app/wa-sessions
 
 EXPOSE 4000
 
-CMD ["node", "server.js"]
+# सर्वर स्टार्ट करने से पहले डेटाबेस में नई टेबल्स बनाना ज़रूरी है
+CMD npx prisma db push --accept-data-loss && node server.js
