@@ -28,7 +28,7 @@ function getSmtpTransport() {
 async function sendViaSmtp(to, subject, html) {
   const transport = getSmtpTransport();
   await transport.sendMail({
-    from: process.env.MAIL_FROM || "WhatsApp Clone <no-reply@example.com>",
+    from: process.env.MAIL_FROM || "WhatsApp Clone <no-reply@basekey.in>",
     to,
     subject,
     html,
@@ -43,7 +43,7 @@ async function sendViaResend(to, subject, html) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: process.env.MAIL_FROM || "WhatsApp Clone <no-reply@example.com>",
+      from: process.env.MAIL_FROM || "WhatsApp Clone <no-reply@basekey.in>",
       to: [to],
       subject,
       html,
