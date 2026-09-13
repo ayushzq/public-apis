@@ -1,0 +1,103 @@
+// Prisma schema targeting Neon (Serverless PostgreSQL).
+// Run `npx prisma migrate dev --name init` after setting DATABASE_URL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum MessageStatus {
+  sent
+  delivered
+  read
+}
+
+enum ParticipantRole {
+  admin
+  member
+}
+
+model User {
+  id               String   @id @default(cuid())
+  email            String   @unique
+  name             String
+  avatar           String?
+  about            String   @default("Hey there! I am using WhatsApp.")
+  onlineStatus     Boolean  @default(false)
+  lastSeenAt       DateTime @default(now())
+  themePreference  String   @default("dark") // "dark" | "light"
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  participants     Participant[]
+  messages         Message[]
+  otps             Otp[]
+
+  @@index([email])
+}
+
+model Otp {
+  id        String   @id @default(cuid())
+  email     String
+  codeHash  String // bcrypt hash of the 6-digit code, never store plaintext
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [email], references: [email])
+
+  @@index([email])
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  isGroup   Boolean  @default(false)
+  name      String? // only used when isGroup = true
+  avatar    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  participants Participant[]
+  messages     Message[]
+}
+
+model Participant {
+  id             String           @id @default(cuid())
+  userId         String
+  conversationId String
+  role           ParticipantRole  @default(member)
+  isFavorite     Boolean          @default(false)
+  isArchived     Boolean          @default(false)
+  unreadCount    Int              @default(0)
+  joinedAt       DateTime         @default(now())
+
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, conversationId])
+  @@index([conversationId])
+}
+
+model Message {
+  id             String        @id @default(cuid())
+  conversationId String
+  senderId       String
+  text           String?
+  mediaUrl       String?
+  mediaType      String? // "image" | "video" | "audio" | "document"
+  status         MessageStatus @default(sent)
+  deleted        Boolean       @default(false)
+  timestamp      DateTime      @default(now())
+
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User          @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([senderId])
+}
