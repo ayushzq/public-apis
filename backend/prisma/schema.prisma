@@ -1,0 +1,124 @@
+// Prisma schema targeting Neon (Serverless PostgreSQL).
+// Run `npx prisma migrate dev --name init` after setting DATABASE_URL.
+//
+// Two concerns are modeled here:
+//  1. App-level identity: User + Otp (our own Email OTP login — unchanged).
+//  2. Real WhatsApp mirroring: WaSession + WaChat + WaMessage, populated
+//     live from a Baileys socket (see src/whatsapp/baileysManager.js).
+//     Each app User can link ONE real WhatsApp account (own phone) by
+//     scanning a QR code; everything under WaChat/WaMessage belongs to
+//     that user's linked account — there is no dummy data anywhere.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id               String   @id @default(cuid())
+  email            String   @unique
+  name             String
+  avatar           String?
+  about            String   @default("Hey there! I am using WhatsApp.")
+  onlineStatus     Boolean  @default(false)
+  lastSeenAt       DateTime @default(now())
+  themePreference  String   @default("dark") // "dark" | "light"
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  otps             Otp[]
+  waSession        WaSession?
+
+  @@index([email])
+}
+
+model Otp {
+  id        String   @id @default(cuid())
+  email     String
+  codeHash  String // bcrypt hash of the 6-digit code, never store plaintext
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [email], references: [email])
+
+  @@index([email])
+}
+
+enum WaConnectionStatus {
+  disconnected
+  connecting
+  qr_pending
+  connected
+}
+
+/// One row per app User who has (or is linking) a real WhatsApp account.
+model WaSession {
+  id              String             @id @default(cuid())
+  userId          String             @unique
+  status          WaConnectionStatus @default(disconnected)
+  phoneNumber     String?
+  waName          String?
+  waAvatarUrl     String?
+  lastConnectedAt DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chats           WaChat[]
+}
+
+/// A real WhatsApp chat (1:1 or group) belonging to one linked account.
+model WaChat {
+  id            String    @id @default(cuid())
+  sessionId     String
+  jid           String // e.g. "91xxxxxxxxxx@s.whatsapp.net" or "xxxx@g.us"
+  name          String?
+  isGroup       Boolean   @default(false)
+  avatarUrl     String?
+  isFavorite    Boolean   @default(false)
+  isArchived    Boolean   @default(false)
+  unreadCount   Int       @default(0)
+  lastMessageAt DateTime?
+  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime  @default(now())
+
+  session       WaSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  messages      WaMessage[]
+
+  @@unique([sessionId, jid])
+  @@index([sessionId])
+}
+
+/// A single real WhatsApp message, synced live from Baileys events.
+model WaMessage {
+  id            String   @id @default(cuid())
+  chatId        String
+  waMessageId   String // Baileys message key.id — used to dedupe + resolve replies
+  fromMe        Boolean
+  senderJid     String?
+  senderName    String?
+  text          String?
+  caption       String?
+  mediaUrl      String? // Cloudinary secure_url once uploaded
+  mediaType     String? // image | video | audio | document | sticker
+  mimeType      String?
+  fileName      String?
+  status        String   @default("sent") // sent | delivered | read
+  deleted       Boolean  @default(false)
+  replyToWaId   String? // waMessageId of the quoted message, if any
+  replyToText   String? // snapshot of quoted text/caption for quick render
+  replyToSender String?
+  timestamp     DateTime
+
+  chat          WaChat   @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, waMessageId])
+  @@index([chatId])
+}
