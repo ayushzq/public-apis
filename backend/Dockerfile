@@ -14,5 +14,5 @@ RUN npx prisma generate
 # पोर्ट 4000 एक्सपोज़ करें (तुम्हारा बैकएंड इसी पर चल रहा है)
 EXPOSE 4000
 
-# सर्वर स्टार्ट करने का कमांड
-CMD ["node", "server.js"]
+# सर्वर स्टार्ट करने का कमांड (टेबल बनाने के साथ)
+CMD npx prisma db push && node server.js
