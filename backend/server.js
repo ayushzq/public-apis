@@ -10,6 +10,10 @@ const whatsappRoutes = require("./src/routes/whatsapp");
 const { initSocket } = require("./src/socket/index");
 
 const app = express();
+
+// Render (Proxy) और Rate Limiter के एरर को फिक्स करने के लिए ये लाइन जोड़ी गई है:
+app.set("trust proxy", 1);
+
 const server = http.createServer(app);
 
 const allowedOrigins = (process.env.CORS_ORIGIN || "http://localhost:3000").split(",");
