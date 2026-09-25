@@ -1,0 +1,47 @@
+# Security fix (BaseKey audit): the old .gitignore didn't exclude .env at
+# all — every secret in it (DB password, NEXTAUTH_SECRET, MOBILE_JWT_SECRET,
+# API keys) would have been committed straight into git history the first
+# time someone ran `git add .`. If any of these were already pushed to a
+# real remote, rotate them — removing a line from .gitignore later doesn't
+# erase it from history.
+
+# dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Next.js build output
+.next
+out
+build
+
+# env files — never commit real secrets
+.env
+.env*.local
+.env.production
+.env.development
+
+# Prisma
+prisma/*.db
+prisma/dev.db
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Testing / coverage
+coverage
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+.vscode/*
+!.vscode/extensions.json

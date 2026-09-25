@@ -1,0 +1,19 @@
+# Perf/compat fix (BaseKey audit — "purana browser support ho"): without a
+# browserslist config, Next.js's default target still covers evergreen
+# browsers reasonably well, but doesn't know it should also cover older
+# ones. This explicitly widens the compiled JS's compatibility target so
+# older phones/browsers (older Safari on iOS, older Android WebView/Chrome,
+# older Samsung Internet, etc.) get code they can actually run, at the cost
+# of very slightly larger bundles for legacy fallbacks.
+
+# Modern build (evergreen browsers) — smallest, fastest bundle
+[modern]
+last 2 Chrome versions
+last 2 Firefox versions
+last 2 Safari versions
+last 2 Edge versions
+
+# Default/legacy build — wider coverage for older devices
+defaults
+not IE 11
+maintained node versions

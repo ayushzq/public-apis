@@ -1,0 +1,502 @@
+// Supabase Postgres:
+//   DATABASE_URL = pooled connection (Supavisor, port 6543, add ?pgbouncer=true&connection_limit=1)
+//   DIRECT_URL   = direct/session connection (port 5432) — only used by `prisma migrate`
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ─── 0. MULTI-TENANT WORKSPACE (ISOLATION LAYER) ───
+model Organization {
+  id      String  @id @default(uuid())
+  name    String  @default("My Workspace")
+  slug    String? @unique
+  ownerId String?
+
+  // Relations
+  users     User[]
+  contacts  Contact[]
+  campaigns Campaign[]
+  apiKeys   ApiKey[]
+  settings  SystemSettings?
+  chatFlows ChatFlow[]
+  templates Template[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+}
+
+// ─── 1. WHATSAPP API AUR SETTINGS (PER WORKSPACE) ───
+model SystemSettings {
+  id             String       @id @default(uuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // phoneNumberId is globally unique (nullable) so two workspaces can never claim the
+  // same WhatsApp number and hijack each other's webhook traffic.
+  phoneNumberId      String? @unique
+  businessAccountId  String  @default("")
+  // accessToken / *ApiKey columns hold AES-256-GCM ciphertext ("enc:v1:...") when
+  // APP_ENCRYPTION_KEY is configured (see src/lib/secrets.ts).
+  accessToken        String  @default("")
+  verifyToken        String  @unique @default(uuid())
+  isAiBotActive      Boolean @default(false)
+  geminiSystemPrompt String  @default("You are a helpful AI assistant for BaseKey CRM.")
+
+  // Multi-AI Provider support
+  aiProvider   String  @default("gemini") // "gemini" | "openai" | "claude"
+  openaiApiKey String?
+  claudeApiKey String?
+  geminiApiKey String?
+
+  // Feature toggles
+  darkModeDefault       Boolean @default(false)
+  featureCampaigns      Boolean @default(true)
+  featureChatbotBuilder Boolean @default(true)
+  featureDeveloperApi   Boolean @default(true)
+  featureTeamPresence   Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
+}
+
+// ─── 2. USERS (OWNER, ADMIN AUR AGENTS) ───
+model User {
+  id            String    @id @default(uuid())
+  name          String?
+  // The same email may exist ONCE as a ROOT (owner) account and ONCE as an AGENT account
+  // (see @@unique below) — that is what lets an agent later start their own workspace.
+  email         String?
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  phone         String?
+  fcmToken      String?
+
+  role        UserRole    @default(OWNER)
+  accountType AccountType @default(ROOT)
+  status      AgentStatus @default(OFFLINE)
+
+  // Brute-force protection
+  failedLogins Int       @default(0)
+  lockedUntil  DateTime?
+
+  // Organization / Workspace Binding
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  // Advanced Access Control & Tracking for Agents
+  allowedPages    String[]  @default(["/chat", "/contacts"])
+  primaryPage     String    @default("/chat")
+  currentActivity String?   @default("Idle")
+  lastSeen        DateTime?
+  department      String?
+
+  // Relations
+  assignedContacts    Contact[]
+  sentMessages        Message[]
+  notes               InternalNote[]
+  quickReplies        QuickReply[]
+  campaigns           Campaign[]
+  apiKeys             ApiKey[]
+  pushSubscriptions   PushSubscription[]
+  notificationSetting NotificationSetting?
+
+  accounts Account[]
+  sessions Session[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([email, accountType])
+  @@index([email])
+  @@index([organizationId])
+}
+
+// ─── NOTIFICATION ENGINE ───
+model PushSubscription {
+  id String @id @default(uuid())
+
+  endpoint  String? @unique
+  p256dh    String?
+  auth      String?
+  userAgent String?
+
+  fcmToken    String?  @unique
+  ownerId     String?
+  deviceModel String?
+  osVersion   String?
+  appVersion  String?
+  platform    String   @default("WEB")
+  lastSeenAt  DateTime @default(now())
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([ownerId])
+}
+
+model NotificationSetting {
+  id     String  @id @default(uuid())
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  notificationsEnabled Boolean @default(true)
+
+  notifyOnNewContact      Boolean @default(true)
+  notifyOnExistingContact Boolean @default(true)
+  notifyOnAssignedOnly    Boolean @default(false)
+  notifyOnCampaignEvents  Boolean @default(true)
+
+  soundEnabled Boolean @default(true)
+  dndEnabled   Boolean @default(false)
+  dndStartTime String? @default("22:00")
+  dndEndTime   String? @default("08:00")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── AUTHENTICATION TABLES ───
+// One live OTP per (email, purpose). Only the SHA-256 hash of the code is stored.
+model OtpCode {
+  id        String   @id @default(uuid())
+  email     String
+  purpose   String   @default("register")
+  codeHash  String
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@unique([email, purpose])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@unique([email, token])
+  @@index([email])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── 3. WHATSAPP CONTACTS (PER WORKSPACE) ───
+model Contact {
+  id               String   @id @default(uuid())
+  phoneNumber      String
+  name             String?
+  email            String?
+  avatarUrl        String?
+  leadStatus       String   @default("NEW")
+  source           String   @default("manual")
+  unreadCount      Int      @default(0)
+  lastMessageAt    DateTime @default(now())
+  isSessionActive  Boolean  @default(true)
+  activeFlowNodeId String?
+
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  assignedToId String?
+  assignedTo   User?   @relation(fields: [assignedToId], references: [id])
+  isBotPaused  Boolean @default(false)
+
+  isMuted Boolean @default(false)
+  isVip   Boolean @default(false)
+
+  messages Message[]
+  notes    InternalNote[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([organizationId, phoneNumber])
+  @@index([organizationId, lastMessageAt])
+  @@index([assignedToId])
+}
+
+// ─── 4. MESSAGES MODEL ───
+model Message {
+  id        String  @id
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  senderId String?
+  sender   User?   @relation(fields: [senderId], references: [id])
+
+  body      String           @default("")
+  type      MessageType      @default(TEXT)
+  direction MessageDirection
+  status    MessageStatus    @default(SENT)
+  mediaUrl  String?
+  source    MessageSource    @default(CHAT)
+
+  replyToId   String?
+  replyToText String?
+
+  isAiGenerated Boolean @default(false)
+  metaMessageId String?
+
+  timestamp DateTime @default(now())
+
+  @@index([contactId, timestamp])
+  @@index([metaMessageId])
+  @@index([timestamp])
+}
+
+// ─── 5. INTERNAL PRIVATE NOTES ───
+model InternalNote {
+  id      String @id @default(uuid())
+  content String
+
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+// ─── 6. QUICK REPLIES ───
+model QuickReply {
+  id       String @id @default(uuid())
+  shortcut String @unique
+  message  String
+
+  authorId String?
+  author   User?   @relation(fields: [authorId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+// ─── 7. CHATBOT FLOW (PER WORKSPACE) ───
+model ChatFlow {
+  id       String  @id @default(uuid())
+  name     String  @default("Default Flow")
+  isActive Boolean @default(true)
+  nodes    Json
+  edges    Json
+
+  organizationId String?       @unique
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  updatedAt DateTime @updatedAt
+}
+
+// ─── 8. TEMPLATES (PER WORKSPACE) ───
+model Template {
+  id         String @id @default(uuid())
+  name       String
+  language   String @default("en_US")
+  category   String @default("MARKETING")
+  components Json
+  status     String @default("DRAFT")
+
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model WhatsAppTemplate {
+  id             String   @id @default(cuid())
+  name           String   @unique
+  language       String
+  category       String
+  bodyPreview    String
+  parameterCount Int      @default(0)
+  status         String   @default("PENDING")
+  approvedAt     DateTime @default(now())
+}
+
+// ─── 9. API KEYS (ISOLATED PER USER & WORKSPACE) ───
+model ApiKey {
+  id          String    @id @default(uuid())
+  name        String
+  // Only the SHA-256 hash is stored — the raw key is shown ONCE at creation time.
+  tokenHash   String    @unique
+  tokenPrefix String    @default("")
+  expiresAt   DateTime?
+  isRevoked   Boolean   @default(false)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  apiLogs ApiLog[]
+
+  @@index([userId])
+  @@index([organizationId])
+}
+
+model ApiLog {
+  id         String  @id @default(cuid())
+  apiKeyId   String?
+  endpoint   String
+  method     String
+  statusCode Int
+  status     String
+  errorMsg   String?
+
+  ipAddress String?
+  userAgent String?
+  referer   String?
+  payload   Json?
+
+  createdAt DateTime @default(now())
+
+  apiKey ApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  @@index([apiKeyId, createdAt])
+}
+
+// ─── 10. CAMPAIGNS (PER WORKSPACE) ───
+model Campaign {
+  id              String    @id @default(uuid())
+  name            String
+  templateName    String    @default("")
+  status          String    @default("DRAFT")
+  totalRecipients Int       @default(0)
+  sentCount       Int       @default(0)
+  failedCount     Int       @default(0)
+  deliveredCount  Int       @default(0)
+  readCount       Int       @default(0)
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  authorId String?
+  author   User?   @relation(fields: [authorId], references: [id])
+
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  logs CampaignLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, createdAt])
+}
+
+model CampaignLog {
+  id            String  @id @default(uuid())
+  campaignId    String
+  contactId     String?
+  phoneNumber   String
+  recipientName String?
+  status        String  @default("QUEUED")
+  messageId     String?
+  errorMessage  String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, phoneNumber])
+  @@index([campaignId, status])
+}
+
+// ─── ENUMS ───
+enum UserRole {
+  OWNER
+  ADMIN
+  AGENT
+}
+
+enum AccountType {
+  ROOT // workspace owner ("root user") — logs in from the Business Owner tab
+  AGENT // team member / admin invited by a root user — logs in from the Support Agent tab
+}
+
+enum AgentStatus {
+  ONLINE
+  BUSY
+  OFFLINE
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  INTERACTIVE
+  TEMPLATE
+  LOCATION
+  STICKER
+}
+
+enum MessageSource {
+  CHAT
+  FLOW
+  API
+  CAMPAIGN
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+}

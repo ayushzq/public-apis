@@ -1,0 +1,77 @@
+name: CI (typecheck, prisma, build)
+
+# Requested check: catch a broken commit — a TypeScript error, a bad Prisma
+# schema change, a build failure — BEFORE it merges, instead of finding out
+# only after `vercel deploy` fails in production.
+#
+# No real secrets are used anywhere in this file. Every env var below is a
+# throwaway placeholder that only needs to be *syntactically present* for
+# `next build` to get past its startup checks (things like "NEXTAUTH_SECRET
+# is required") — none of it points at a real database or a real account,
+# and nothing here is ever sent anywhere outside the GitHub Actions runner.
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Typecheck, lint, and build
+    runs-on: ubuntu-latest
+
+    env:
+      # ── Placeholders only — never real credentials ──
+      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_placeholder"
+      DIRECT_URL: "postgresql://ci:ci@localhost:5432/ci_placeholder"
+      NEXTAUTH_SECRET: "ci-placeholder-secret-not-for-real-use"
+      NEXTAUTH_URL: "http://localhost:3000"
+      APP_ENCRYPTION_KEY: "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE="
+      MOBILE_JWT_SECRET: "ci-placeholder-mobile-secret"
+      META_APP_SECRET: "ci-placeholder-meta-app-secret"
+      VAPID_PRIVATE_KEY: ""
+      VAPID_SUBJECT: "mailto:ci@example.com"
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+      NEXT_PUBLIC_BASE_URL: "http://localhost:3000"
+      NODE_ENV: "production"
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true # style issues shouldn't block a deploy; real errors are still caught by typecheck/build
+
+      - name: Build
+        run: npx next build
+
+      - name: Check migrations are in sync with schema.prisma
+        run: |
+          npx prisma migrate diff \
+            --from-migrations ./prisma/migrations \
+            --to-schema-datamodel ./prisma/schema.prisma \
+            --shadow-database-url "$DATABASE_URL" \
+            --exit-code || (echo "::error::prisma/schema.prisma has changes that aren't captured in a migration file. Run 'npx prisma migrate dev' locally and commit the new migration." && exit 1)
+        continue-on-error: true # informational until a real (non-placeholder) DB is wired into CI

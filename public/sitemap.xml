@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+
+  <!-- Home Page with Logo -->
+  <url>
+    <loc>https://basekey.in/</loc>
+    <lastmod>2026-08-05T00:00:00+00:00</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.00</priority>
+    <image:image>
+      <image:loc>https://basekey.in/logo.png</image:loc>
+      <image:title>BaseKey - Social Media Unlock</image:title>
+      <image:caption>BaseKey Platform Logo</image:caption>
+    </image:image>
+  </url>
+
+  <!-- Main App Pages -->
+  <url><loc>https://basekey.in/dashboard</loc><changefreq>weekly</changefreq><priority>0.80</priority></url>
+  <url><loc>https://basekey.in/chat</loc><changefreq>weekly</changefreq><priority>0.80</priority></url>
+  <url><loc>https://basekey.in/chatbot-builder</loc><changefreq>weekly</changefreq><priority>0.80</priority></url>
+  <url><loc>https://basekey.in/campaigns</loc><changefreq>weekly</changefreq><priority>0.80</priority></url>
+  <url><loc>https://basekey.in/contacts</loc><changefreq>weekly</changefreq><priority>0.80</priority></url>
+  <url><loc>https://basekey.in/template</loc><changefreq>weekly</changefreq><priority>0.80</priority></url>
+  <url><loc>https://basekey.in/developers</loc><changefreq>weekly</changefreq><priority>0.80</priority></url>
+
+  <!-- Auth & Info Pages -->
+  <url><loc>https://basekey.in/login</loc><changefreq>monthly</changefreq><priority>0.50</priority></url>
+  <url><loc>https://basekey.in/help</loc><changefreq>monthly</changefreq><priority>0.50</priority></url>
+  <url><loc>https://basekey.in/privacy-policy</loc><changefreq>monthly</changefreq><priority>0.30</priority></url>
+  <url><loc>https://basekey.in/terms-of-service</loc><changefreq>monthly</changefreq><priority>0.30</priority></url>
+
+</urlset>
