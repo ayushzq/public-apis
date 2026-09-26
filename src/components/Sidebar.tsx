@@ -20,7 +20,7 @@ import {
   Code2,
   UserPlus, 
   LogOut,
-  Sparkles
+  Link2
 } from "lucide-react";
 import ConfigModal from "./ConfigModal";
 
@@ -41,7 +41,7 @@ export default function Sidebar() {
   const agentName = session?.user?.name || "Team Member";
   const allowedPages = ((session?.user as any)?.allowedPages as string[]) || [];
 
-  // Background silent check — page ko block nahi karta
+  // Backend se encrypted status check karta hai
   const fetchConfigStatus = async () => {
     try {
       setCheckingConfig(true);
@@ -49,7 +49,14 @@ export default function Sidebar() {
       if (res.ok) {
         const data = await res.json();
         const conf = data?.settings || data?.config || data;
-        setIsMatched(!!(conf && conf.accessToken && String(conf.accessToken).length > 10));
+        
+        // Backend `hasAccessToken: true` aur `phoneNumberId` bhejta hai
+        const isLinked = !!(
+          conf && 
+          (conf.hasAccessToken || (conf.accessToken && String(conf.accessToken).length > 10)) && 
+          conf.phoneNumberId
+        );
+        setIsMatched(isLinked);
       } else {
         setIsMatched(false); 
       }
@@ -129,6 +136,7 @@ export default function Sidebar() {
 
   return (
     <>
+      {/* Desktop Sidebar */}
       <aside
         className={`hidden md:flex flex-col h-full bg-white dark:bg-[#09090b] border-r border-zinc-200 dark:border-zinc-800 z-40 shrink-0 transition-all duration-300 ease-in-out ${
           collapsed ? "w-[64px]" : "w-[220px]"
@@ -159,7 +167,7 @@ export default function Sidebar() {
           </button>
         </div>
 
-        {/* Unconnected Warning Strip (Only for Admin when API is not linked) */}
+        {/* Unconnected Warning Strip (Sirf tab aayega jab sach me link na ho) */}
         {!isMatched && userRole === "ADMIN" && (
           <div 
             onClick={() => setIsModalOpen(true)}
@@ -230,6 +238,26 @@ export default function Sidebar() {
             );
           })}
 
+          {/* Quick API Modal Shortcut for Admin */}
+          {userRole === "ADMIN" && (
+            <div
+              className={`flex items-center gap-3 rounded-md px-2.5 py-2 cursor-pointer transition-all duration-150 ${
+                !isMatched 
+                  ? "bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 font-medium" 
+                  : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-200"
+              } ${collapsed ? "justify-center px-0" : ""}`}
+              onClick={() => setIsModalOpen(true)}
+              title={collapsed ? (isMatched ? "Configuration" : "Connect API") : undefined}
+            >
+              <Link2 className={`shrink-0 ${!isMatched ? "text-amber-600 dark:text-amber-400" : "text-zinc-400 dark:text-zinc-500"} ${collapsed ? "w-5 h-5" : "w-4 h-4"}`} />
+              {!collapsed && (
+                <span className="text-[13px]">
+                  {isMatched ? "Configuration" : "Connect API"}
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Profile & Logout */}
           <div
             onClick={handleLogout}
@@ -251,10 +279,89 @@ export default function Sidebar() {
                 </span>
               </div>
             )}
-            {!collapsed && <LogOut className="w-3.5 h-3.5 text-zinc-400 group-hover:text-red-500 ml-auto shrink-0 transition-colors" />}
+            {!collapsed && isMatched && (
+              <CheckCircle2 className="w-3.5 h-3.5 text-[#25D366] ml-auto shrink-0 group-hover:hidden" />
+            )}
+            {!collapsed && (
+              <LogOut className={`w-3.5 h-3.5 text-zinc-400 group-hover:text-red-500 ml-auto shrink-0 transition-colors ${isMatched ? "hidden group-hover:block" : ""}`} />
+            )}
           </div>
         </div>
       </aside>
+
+      {/* Mobile Bottom Navigation */}
+      <nav
+        className={`md:hidden fixed bottom-0 left-0 right-0 z-30 bg-white dark:bg-[#09090b] border-t border-zinc-200 dark:border-zinc-800 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.4)] transition-all duration-300 ease-in-out ${
+          hideOnMobile
+            ? "translate-y-full opacity-0 pointer-events-none"
+            : "translate-y-0 opacity-100"
+        }`}
+      >
+        <div className="flex items-center h-16 px-2 overflow-x-auto gap-2 w-full [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+          {navItems.map((item) => {
+            const active = isActive(item.activePaths);
+            return (
+              <Link key={item.href} href={item.href} className="flex-1 min-w-[64px] shrink-0">
+                <div className="flex flex-col items-center justify-center gap-0.5 py-1.5">
+                  <div
+                    className={`relative w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+                      active
+                        ? "bg-[#e8faf0] dark:bg-[#25D366]/10 text-[#25D366]"
+                        : "text-zinc-400 dark:text-zinc-500"
+                    }`}
+                  >
+                    <item.icon className="w-[18px] h-[18px]" />
+                  </div>
+                  <span
+                    className={`text-[9.5px] font-medium ${
+                      active ? "text-[#25D366]" : "text-zinc-500 dark:text-zinc-400"
+                    }`}
+                  >
+                    {item.label}
+                  </span>
+                </div>
+              </Link>
+            );
+          })}
+
+          {userRole === "ADMIN" && (
+            <>
+              <button
+                onClick={() => setIsModalOpen(true)}
+                className="flex-1 min-w-[64px] shrink-0 flex flex-col items-center justify-center gap-0.5 py-1.5"
+              >
+                <div className={`relative w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+                  !isMatched
+                    ? "bg-amber-100 dark:bg-amber-950/40 text-amber-600"
+                    : "text-zinc-400 dark:text-zinc-500"
+                }`}>
+                  <Link2 className="w-[18px] h-[18px]" />
+                  {!isMatched && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-amber-500 rounded-full animate-ping" />
+                  )}
+                </div>
+                <span className={`text-[9.5px] font-medium ${!isMatched ? "text-amber-600 font-bold" : "text-zinc-500 dark:text-zinc-400"}`}>
+                  {isMatched ? "Config" : "Connect"}
+                </span>
+              </button>
+
+              <Link href="/settings" className="flex-1 min-w-[64px] shrink-0">
+                <div className="flex flex-col items-center justify-center gap-0.5 py-1.5">
+                  <div className={`relative w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+                    pathname === "/settings" || pathname?.startsWith("/settings/") ? "bg-[#e8faf0] dark:bg-[#25D366]/10 text-[#25D366]" : "text-zinc-400 dark:text-zinc-500"
+                  }`}>
+                    <Settings className="w-[18px] h-[18px]" />
+                  </div>
+                  <span className={`text-[9.5px] font-medium ${
+                    pathname === "/settings" || pathname?.startsWith("/settings/") ? "text-[#25D366]" : "text-zinc-500 dark:text-zinc-400"
+                  }`}>Settings</span>
+                </div>
+              </Link>
+            </>
+          )}
+        </div>
+        <div className="h-[env(safe-area-inset-bottom)] bg-white dark:bg-[#09090b]" />
+      </nav>
 
       {/* WhatsApp Setup Modal */}
       {userRole === "ADMIN" && (
