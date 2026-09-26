@@ -4,25 +4,6 @@ import { prisma } from "@/lib/prisma";
 import { getTenantContext } from "@/lib/tenant";
 import { encrypt, decrypt, maskSecret } from "@/lib/secrets";
 
-// BaseKey audit fixes applied here:
-//  1. `getServerSession()` (no `authOptions`) returns null inside route
-//     handlers more often than not — swapped every route in this file over
-//     to `getTenantContext()`, which passes `authOptions` and resolves the
-//     org by the session's user id (works even though email is no longer
-//     unique across ROOT/AGENT rows).
-//  2. WhatsApp accessToken / AI provider keys are now encrypted at rest
-//     (see src/lib/secrets.ts) and are NEVER returned to the browser in
-//     plain text — GET only ever sends a masked preview plus a boolean
-//     "is one saved" flag. This is also what the user asked for: the
-//     Settings page should not display what was previously saved.
-//  3. Only the workspace OWNER can read or change WhatsApp/AI credentials.
-//     Agents (role !== OWNER) can still read the non-secret feature toggles
-//     so the rest of the UI can render, but a POST from a non-owner is
-//     rejected outright.
-//  4. `phoneNumberId` is stored as `null` (not `""`) when unset — the schema
-//     makes it `@unique`, and Postgres treats every NULL as distinct while
-//     two orgs both saving `""` would collide and 500 on the second save.
-
 function maskedSettingsPayload(settings: {
   accessToken: string;
   openaiApiKey: string | null;
@@ -63,7 +44,6 @@ export async function GET() {
     if (!settings) return NextResponse.json({});
 
     if (ctx.user.role !== "OWNER") {
-      // Agents get feature flags / non-secret display prefs only.
       return NextResponse.json({
         darkModeDefault: settings.darkModeDefault,
         featureCampaigns: settings.featureCampaigns,
@@ -95,6 +75,7 @@ export async function POST(req: Request) {
       accessToken,
       phoneNumberId,
       businessAccountId,
+      verifyToken,
       isAiBotActive,
       geminiSystemPrompt,
       aiProvider,
@@ -113,16 +94,22 @@ export async function POST(req: Request) {
       if (value !== undefined) patch[key] = value;
     };
 
-    // Empty-string means "leave the currently-saved secret untouched" (the
-    // settings page never round-trips the real value back into the input),
-    // so only overwrite when the field is a genuinely new, non-empty value.
-    if (typeof accessToken === "string" && accessToken.length > 0) patch.accessToken = encrypt(accessToken);
-    if (typeof openaiApiKey === "string" && openaiApiKey.length > 0) patch.openaiApiKey = encrypt(openaiApiKey);
-    if (typeof claudeApiKey === "string" && claudeApiKey.length > 0) patch.claudeApiKey = encrypt(claudeApiKey);
-    if (typeof geminiApiKey === "string" && geminiApiKey.length > 0) patch.geminiApiKey = encrypt(geminiApiKey);
+    if (typeof accessToken === "string" && accessToken.trim().length > 0) {
+      patch.accessToken = encrypt(accessToken.trim());
+    }
+    if (typeof openaiApiKey === "string" && openaiApiKey.trim().length > 0) {
+      patch.openaiApiKey = encrypt(openaiApiKey.trim());
+    }
+    if (typeof claudeApiKey === "string" && claudeApiKey.trim().length > 0) {
+      patch.claudeApiKey = encrypt(claudeApiKey.trim());
+    }
+    if (typeof geminiApiKey === "string" && geminiApiKey.trim().length > 0) {
+      patch.geminiApiKey = encrypt(geminiApiKey.trim());
+    }
 
     setIfDefined("phoneNumberId", phoneNumberId ? phoneNumberId : null);
     setIfDefined("businessAccountId", businessAccountId);
+    if (verifyToken) setIfDefined("verifyToken", verifyToken);
     setIfDefined("isAiBotActive", isAiBotActive);
     setIfDefined("geminiSystemPrompt", geminiSystemPrompt);
     setIfDefined("aiProvider", aiProvider);
@@ -137,16 +124,16 @@ export async function POST(req: Request) {
       update: patch,
       create: {
         organizationId: ctx.orgId,
-        accessToken: accessToken ? encrypt(accessToken) : "",
+        accessToken: accessToken ? encrypt(accessToken.trim()) : "",
         phoneNumberId: phoneNumberId ? phoneNumberId : null,
         businessAccountId: businessAccountId ?? "",
-        verifyToken: crypto.randomUUID(),
+        verifyToken: verifyToken || crypto.randomUUID(),
         isAiBotActive: isAiBotActive ?? false,
         geminiSystemPrompt: geminiSystemPrompt ?? undefined,
         aiProvider: aiProvider ?? "gemini",
-        openaiApiKey: openaiApiKey ? encrypt(openaiApiKey) : null,
-        claudeApiKey: claudeApiKey ? encrypt(claudeApiKey) : null,
-        geminiApiKey: geminiApiKey ? encrypt(geminiApiKey) : null,
+        openaiApiKey: openaiApiKey ? encrypt(openaiApiKey.trim()) : null,
+        claudeApiKey: claudeApiKey ? encrypt(claudeApiKey.trim()) : null,
+        geminiApiKey: geminiApiKey ? encrypt(geminiApiKey.trim()) : null,
         darkModeDefault: darkModeDefault ?? false,
         featureCampaigns: featureCampaigns ?? true,
         featureChatbotBuilder: featureChatbotBuilder ?? true,
