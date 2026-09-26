@@ -30,6 +30,8 @@ export default function ConfigModal({ isOpen, onClose, onSuccess }: ConfigModalP
 
   const [setupMode, setSetupMode] = useState<"manual" | "auto">("manual");
   const [accessToken, setAccessToken] = useState("");
+  const [hasAccessToken, setHasAccessToken] = useState(false);
+  const [accessTokenPreview, setAccessTokenPreview] = useState("");
   const [phoneId, setPhoneId] = useState("");
   const [wabaId, setWabaId] = useState("");
   const [verifyToken, setVerifyToken] = useState("");
@@ -44,11 +46,15 @@ export default function ConfigModal({ isOpen, onClose, onSuccess }: ConfigModalP
           const res = await fetch("/api/config");
           if (res.ok) {
             const data = await res.json();
-            setAccessToken(data.accessToken || "");
-            setPhoneId(data.phoneNumberId || "");
-            setWabaId(data.businessAccountId || "");
-            if (data.verifyToken) {
-              setVerifyToken(data.verifyToken);
+            const conf = data?.settings || data?.config || data;
+            
+            // Backend boolean flag ya existing preview check karein
+            setHasAccessToken(!!(conf?.hasAccessToken || (conf?.accessToken && conf?.accessToken?.length > 10)));
+            setAccessTokenPreview(conf?.accessTokenPreview || "");
+            setPhoneId(conf?.phoneNumberId || "");
+            setWabaId(conf?.businessAccountId || "");
+            if (conf?.verifyToken) {
+              setVerifyToken(conf.verifyToken);
             }
           }
         } catch (error) {
@@ -73,8 +79,14 @@ export default function ConfigModal({ isOpen, onClose, onSuccess }: ConfigModalP
   if (!isOpen) return null;
 
   const handleManualSave = async () => {
-    if (!accessToken.trim() || !phoneId.trim() || !wabaId.trim()) {
-      toast.error("Please fill all Meta API credentials!");
+    // Agar pehle se token saved nahi hai aur field bhi empty hai, tabhi block karein
+    if (!hasAccessToken && !accessToken.trim()) {
+      toast.error("Please enter your Permanent Access Token!");
+      return;
+    }
+
+    if (!phoneId.trim() || !wabaId.trim()) {
+      toast.error("Please fill Phone Number ID and WABA ID!");
       return;
     }
 
@@ -90,7 +102,7 @@ export default function ConfigModal({ isOpen, onClose, onSuccess }: ConfigModalP
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          accessToken: accessToken.trim(),
+          accessToken: accessToken.trim(), // khali bhejne par backend purana token barkarar rakhta hai
           phoneNumberId: phoneId.trim(),
           businessAccountId: wabaId.trim(),
           verifyToken: verifyToken.trim(),
@@ -174,16 +186,28 @@ export default function ConfigModal({ isOpen, onClose, onSuccess }: ConfigModalP
               
               {/* Access Token */}
               <div className="space-y-1.5">
-                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-                  <Key className="w-4 h-4 text-gray-500 dark:text-gray-400" /> Permanent Access Token
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                    <Key className="w-4 h-4 text-gray-500 dark:text-gray-400" /> Permanent Access Token
+                  </label>
+                  {hasAccessToken && (
+                    <span className="text-[11px] text-[#25D366] font-semibold flex items-center gap-1 bg-green-500/10 px-2 py-0.5 rounded-md">
+                      <Check className="w-3 h-3 text-[#25D366]" /> Token Active
+                    </span>
+                  )}
+                </div>
                 <input
                   type="password"
                   value={accessToken}
                   onChange={(e) => setAccessToken(e.target.value)}
-                  placeholder="EAAGm0P..."
+                  placeholder={hasAccessToken ? (accessTokenPreview ? `${accessTokenPreview} (Saved)` : "•••••••••••••••• (Encrypted & Active)") : "EAAGm0P..."}
                   className="w-full bg-white dark:bg-[#161D27] border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-xl px-4 py-3 outline-none focus:ring-4 focus:ring-green-500/10 focus:border-[#25D366] text-sm font-medium transition-all shadow-sm"
                 />
+                {hasAccessToken && (
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 pl-1">
+                    Token is already saved securely. Leave blank unless you want to replace it.
+                  </p>
+                )}
               </div>
 
               {/* Phone ID & WABA ID */}
